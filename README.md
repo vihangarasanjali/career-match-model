@@ -2,7 +2,7 @@
 
 ## Overview
 
-This project aims to predict whether a student/job seeker is a suitable match for a given job using Machine Learning.
+This project predicts whether a student/job seeker is a suitable match for a given job using Machine Learning, and serves the model through a FastAPI service.
 
 The target variable is:
 
@@ -11,26 +11,35 @@ The target variable is:
 
 ---
 
+## Project Structure
+
+```text
+career-match-model/
+├── main.py                  # FastAPI prediction service
+├── requirements.txt
+├── artifacts/               # Dataset (Job_Data.csv)
+├── notebooks/
+│   ├── model_building.ipynb
+│   └── prediction_pipeline.ipynb
+└── static/
+    └── model/
+        ├── model.pickle
+        └── feature_columns.pickle
+```
+
+---
+
 ## Dataset
 
-Dataset used:
-
-`Job_Data.csv`
+Dataset used: `Job_Data.csv`
 
 * Original dataset: **10000 records**
 * Target: `Job_Match`
-* Removed identifier columns:
-
-  * `Student_ID`
-  * `Job_ID`
-  * `Gender`
-  * `Location`
-  * `Age`
-
+* Removed columns: `Student_ID`, `Job_ID`, `Gender`, `Location`, `Age`
 
 ### Categorical Features
 
-The following categorical features were converted using One-Hot Encoding:
+Converted using One-Hot Encoding:
 
 * `Job_Title`
 * `Degree_Program`
@@ -39,39 +48,22 @@ The following categorical features were converted using One-Hot Encoding:
 
 ## Data Preprocessing
 
-The following preprocessing steps were completed:
-
 1. Loaded and explored the dataset.
 2. Checked for duplicate values and missing values.
-3. Removed unnecessary ID columns.
+3. Removed unnecessary ID and unused columns.
 4. Applied One-Hot Encoding to categorical features.
 5. Separated features (`X`) and target (`y`).
-6. Split the dataset into training and testing sets using an 80/20 split.
-7. Used stratified splitting to preserve the target class distribution.
-
+6. Split into training and testing sets (80/20, stratified to preserve the class distribution).
 
 ## Feature Scaling
 
-`StandardScaler` was used for models that require or benefit from feature scaling.
+`StandardScaler` was used for models that require or benefit from scaling (Logistic Regression and SVM). For these models the scaler is part of a scikit-learn `Pipeline`, so it is fitted on the training data only and applied automatically at prediction time.
 
-Scaled data was used for:
-
-* Logistic Regression
-* SVM
-
-Unscaled data was used for:
-
-* Multinomial Naive Bayes
-* Decision Tree
-* Random Forest
-
-Multinomial Naive Bayes was kept unscaled because it requires non-negative feature values.
+Unscaled data was used for Multinomial Naive Bayes (requires non-negative values), Decision Tree and Random Forest.
 
 ---
 
 ## Models Tested
-
-The following classification algorithms were evaluated:
 
 * Logistic Regression
 * Multinomial Naive Bayes
@@ -79,26 +71,13 @@ The following classification algorithms were evaluated:
 * Random Forest
 * Support Vector Machine (SVM)
 
-For some models, hyperparameter tuning was performed using `GridSearchCV`.
-
----
+Hyperparameter tuning was performed with `GridSearchCV` (5-fold, scored on F1).
 
 ## Evaluation Metrics
 
-The models were evaluated using:
-
-* Accuracy
-* Precision
-* Recall
-* F1-Score
-
-Since the dataset is imbalanced, **F1-score and Recall** were given particular attention rather than relying only on accuracy.
-
----
+Accuracy, Precision, Recall and F1-Score. Because the dataset is imbalanced, F1-score and Recall were given particular attention.
 
 ## Model Results
-
-Current test results:
 
 | Model                   |  Accuracy | Precision |    Recall |  F1-Score |
 | ----------------------- | --------: | --------: | --------: | --------: |
@@ -110,83 +89,128 @@ Current test results:
 
 ### Selected Model
 
-**Support Vector Machine**
+**Support Vector Machine** (highest test F1-score of 0.933 and highest recall of 0.952).
 
-It was selected based mainly on its:
+### Probability Calibration
 
-* Highest test F1-score: **0.933**
-* Highest recall: **0.952** among the tested models
+The SVM was wrapped in `CalibratedClassifierCV` (sigmoid, 5-fold) so that it can output probabilities. The calibrated model scores slightly differently on the test set:
 
-The model provides a good balance between identifying matching and non-matching cases.
+| Accuracy | Precision | Recall | F1-Score |
+| -------: | --------: | -----: | -------: |
+|    0.957 |     0.916 |  0.943 |    0.929 |
+
+On the test set, about 62% of predicted probabilities fall below 10% and about 21% above 90%, with the remainder spread between. The model is therefore very confident on clear-cut cases and gives intermediate values for borderline ones.
 
 ---
 
 ## Model Saving
 
-The trained Support Vector Machine model was saved using `pickle`.
+The calibrated SVM was saved with `pickle`:
 
-Current model files:
+* `static/model/model.pickle`: the trained, calibrated model (includes the scaler).
+* `static/model/feature_columns.pickle`: the feature names and order used during training.
 
-```text
-static/
-└── model/
-    ├── model.pickle
-    └── feature_columns.pickle
-```
-
-`model.pickle` contains the trained model.
-
-`feature_columns.pickle` contains the feature names and their order used during training. This is required to ensure that new input has the same feature structure as the training data.
+Pickles should be loaded with the same scikit-learn version used for training (`scikit-learn==1.9.0`).
 
 ---
 
 ## Prediction Pipeline
 
-A prediction pipeline was created for making predictions on new input.
-
-The prediction process is:
-
 ```text
 New Input
     ↓
-Remove unnecessary ID columns
+Remove unused columns
     ↓
 One-Hot Encoding
     ↓
 Match training feature columns
     ↓
-Load saved SVM model
+Load saved calibrated SVM
     ↓
-Predict Job Match Class
-    ↓
-Calculate Estimated Match Probability
-    ↓
-Return Prediction and Match Percentage
+Predict class + estimated match probability
 ```
 
-The original training dataset does not need to be loaded again during prediction. The saved model and feature columns are sufficient, provided that the input preprocessing matches the training process.
-
-The calibrated SVM handles the scaling and classification steps internally because the scaler is included in the saved estimator. No separate StandardScaler operation is required during prediction.
+The training dataset is not needed at prediction time. Scaling is handled inside the saved estimator, so no separate `StandardScaler` step is required.
 
 ---
 
-## Prediction Output
-``` 
+## FastAPI Service
 
-The calibrated SVM provides two outputs:
+`main.py` exposes the model over HTTP. The model and feature columns are loaded once at startup.
 
-Predicted class: 1 for Job Match or 0 for Job Not Match.
+### Setup
 
-Estimated match probability: The model's estimated probability that the input belongs to the Job Match class.
-
-Example result:
-
-Prediction: Job Match
-Estimated Match Probability: 99.4%
-
-The match percentage is obtained using predict_proba() and represents the model's estimated probability of a positive match, not the percentage of job requirements satisfied.
-
-The probability should be validated on unseen test data before being interpreted as a reliable estimate.
+```bash
+python -m venv env
+env\Scripts\activate        # Windows
+# source env/bin/activate   # macOS / Linux
+pip install -r requirements.txt
 ```
+
+### Run
+
+```bash
+python -m uvicorn main:app --reload --port 8000
+```
+
+Interactive docs: `http://localhost:8000/docs`
+
+### Endpoints
+
+| Method | Path       | Description                                              |
+| ------ | ---------- | -------------------------------------------------------- |
+| GET    | `/health`  | Service liveness check                                   |
+| GET    | `/options` | Valid `Job_Title` and `Degree_Program` values            |
+| POST   | `/predict` | Predict job match for one candidate/job pair             |
+
+### Request (`POST /predict`)
+
+`Academic_Performance` is a **percentage** (0-100). Any CGPA conversion must be done by the caller before sending. `Job_Title` and `Degree_Program` must be values returned by `GET /options`; unknown values return `422`.
+
+```json
+{
+  "Academic_Performance": 75,
+  "Certifications_Count": 2,
+  "Internship_Experience": 6,
+  "Skill_Programming": 7,
+  "Skill_Database_SQL": 7,
+  "Skill_Version_Control_Git": 7,
+  "Skill_Problem_Solving": 8,
+  "Skill_Communication": 7,
+  "Required_Programming": 8,
+  "Required_Database_SQL": 8,
+  "Required_Version_Control_Git": 8,
+  "Required_Problem_Solving": 8,
+  "Required_Communication": 8,
+  "Min_Experience_Months": 6,
+  "Job_Title": "<value from /options>",
+  "Degree_Program": "<value from /options>"
+}
+```
+
+### Response
+
+```json
+{
+  "result": "Job Match",
+  "prediction": 1,
+  "match_percentage": 82.02
+}
+```
+
+* `prediction`: `1` for Job Match, `0` for Job Not Match.
+* `match_percentage`: the model's estimated probability of a positive match from `predict_proba()`. It is **not** the percentage of job requirements satisfied.
+
+---
+
+## Integration
+
+```text
+React (career-match-web)  →  Node.js API (:5000)  →  FastAPI (:8000)  →  Model
+```
+
+The Node.js backend maps the frontend fields to the model's column names, converts CGPA to a percentage, and calls this service at `ML_API_URL` (default `http://localhost:8000`).
+
+
 
 
