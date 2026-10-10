@@ -189,11 +189,4 @@ The match percentage is obtained using predict_proba() and represents the model'
 The probability should be validated on unseen test data before being interpreted as a reliable estimate.
 ```
 
-## Next Steps
-
-* Build the application interface/API for new user input.
-* Connect the saved model to the application.
-* Create a user-friendly prediction result.
-* Test the model with different new inputs.
-* Improve and validate the complete prediction system.
 
